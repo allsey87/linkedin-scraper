@@ -1,2 +1,2 @@
-# linkedin-scrapper
-A python-based scrapper for job listing data on Linkedin
+# linkedin-scraper
+A python-based scraper for job listing data on Linkedin
