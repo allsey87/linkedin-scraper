@@ -1,4 +1,5 @@
-import csv, demjson, getopt, sys, requests, re 
+import csv, getopt, sys, requests, re
+from bs4 import BeautifulSoup
 
 def main():
     try:
@@ -29,7 +30,7 @@ def main():
     # constants
     csv_header = ['Job ID', 'Title', 'URL', 'Company Name', 'Company Location', 'Date Posted']
     base_url = 'https://www.linkedin.com'
-    job_search_url = '/jobs/search?keywords={0}&locationId={1}:0'
+    job_search_url = '/jobs/search?keywords={0}&locationId={1}:0&start={2}'
 
     # init database as an empty dictionary
     database = {}
@@ -48,39 +49,45 @@ def main():
                 }
 
     # init the search URL
-    current_url = job_search_url.format(keyword, country)
+    start_job_index = 0
+    current_url = job_search_url.format(keyword, country, start_job_index)
+    last_response_valid = True
 
-    while current_url is not None:
+    while last_response_valid:
         # fetch current URL
         response = requests.get(base_url + current_url)
         print('fetch:', base_url + current_url, response.status_code)
         if response.status_code != 200:
             print('warning: status code was not 200')
-            break;
-            
-        # find the JSON data containing the listings on the current page
-        pattern = re.compile('<code id="decoratedJobPostingsModule"><!--(.+?)--></code>')
-        listings = {}
-        for match in pattern.finditer(response.text):
-            if 'decoratedJobPosting' in match.group(1):
-                listings = demjson.decode(match.group(1))
-                break
+            last_response_valid = False
+            break
+        
+        response = BeautifulSoup(response.text, features="html5lib")
 
-        if 'elements' in listings:
-            # add listing to database if it doesn't already exist
-            for listing in listings['elements']:
-                if listing['decoratedJobPosting']['jobPosting']['id'] not in database:
-                    database[listing['decoratedJobPosting']['jobPosting']['id']] = {
-                            'Title':listing['decoratedJobPosting']['jobPosting']['title'],
-                            'URL':listing['viewJobCanonicalUrl'],
-                            'Company Name':listing['decoratedJobPosting']['companyName'],
-                            'Company Location':listing['decoratedJobPosting']['cityState'],
-                            'Date Posted':listing['decoratedJobPosting']['formattedListDate'],
+        for job in response('li', class_=re.compile("result-card")) :
+            try:
+                job_id = job['data-id']
+                job_url = job.find('a', class_='result-card__full-card-link')['href'].split('?')[0]
+                job_title = job.find('h3').string
+                job_company = job.find('h4').string
+                job_location = job.find('span', class_="job-result-card__location").string
+                job_date_posted = job.find('time')['datetime']
+            except:
+                print('error: could not parse job information from response')
+                last_response_valid = False
+                break
+            else:
+                if job_id not in database:
+                    database[job_id] = {
+                            'Title':job_title,
+                            'URL':job_url,
+                            'Company Name':job_company,
+                            'Company Location':job_location,
+                            'Date Posted':job_date_posted,
                     }
-            current_url = listings['paging']['links']['next']
-        else:
-            print('warning: fetched page did not contain json data')
-            break;
+        start_job_index = start_job_index + 25
+        current_url = job_search_url.format(keyword, country, start_job_index)
+
 
     # write the database back to the file
     if csv_database is None:
